@@ -72,14 +72,14 @@ main(int argc, char** argv)
   
   ctx.tftpd_opts.port = 69;
   ctx.tftpd_opts.uparms = 1;
-  strcpy(ctx.tftpd_opts.addr, "10.0.0.1");
+  strcpy(ctx.tftpd_opts.addr, "0.0.0.0");
 
   if (ctx.tftpd) {
     tftpd_ctx_t* tfc = tftpd_start(&ctx.tftpd_opts);
     if (!tfc) {
       fprintf(stderr, "failed to start tftpd\n");
+      abort(); /* FIXME: err handling */
     }
-    abort(); /* FIXME: err handling */
   }
   
   while (1) {
@@ -120,6 +120,7 @@ bootit__parse_cfg(struct bootit_ctx* ctx, const char* cfg)
   /* determine directory where the config lives */
   char cfgdir[PATH_MAX];
   getcwd(cfgdir, sizeof(cfgdir));
+  strncat(cfgdir, "/", sizeof(cfgdir)-1);
   strncat(cfgdir, cfg, sizeof(cfgdir)-1);
   char* ps = strrchr(cfgdir, '/'); /* strip filename component */
   if (ps) *ps = 0;

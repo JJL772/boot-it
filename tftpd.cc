@@ -459,6 +459,7 @@ tftpd__find_file(tftpd_ctx_t* ctx, const char* file)
   for (const auto& p : ctx->opts.paths) {
     char tryFind[PATH_MAX];
     snprintf(tryFind, sizeof(tryFind), "%s/%s", p.data(), file);
+    printf("[find] checking %s...\n", tryFind);
     
     struct stat st;
     if (stat(tryFind, &st) < 0)
