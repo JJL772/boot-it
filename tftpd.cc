@@ -8,7 +8,7 @@
 // No part of 'lwtftp', including this file, may be copied, modified, propagated,
 // or otherwise distributed except according to the terms contained in the LICENSE file.
 //
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BSD-3-Clause
 //-----------------------------------------------------------------------------------------
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,7 +92,7 @@ static void _send_error_resp(
   uint16_t errcode,
   const char *msg
 );
-static void _send_ack(
+static void tftpd__send_ack(
   int fd,
   struct sockaddr_in *dst,
   socklen_t socklen,
@@ -104,6 +104,7 @@ static int tftpd__init(tftpd_ctx_t* ctx, const tftpd_opts_t* opts);
 static int tftpd__run(tftpd_ctx_t* ctx);
 static void* tftpd__thread_proc(void* p);
 static std::string tftpd__find_file(tftpd_ctx_t* ctx, const char* file);
+static void tftpd__send_data(tftpd_ctx_t* ctx, tftpd_state_t* client, int block);
 
 struct tftpd_ctx
 {
@@ -314,9 +315,16 @@ tftpd__run(tftpd_ctx_t* ctx)
           client->errored = 1;
           break;
         }
+        
+        /* Send initial data */
+        if (op == TFTP_RRQ) {
+          tftpd__send_data(ctx, client, 1);
+        }
+        else {
+          tftpd__send_ack(ctx->sock, &fromaddr, fromsize, 0);
+        }
 
-        _send_ack(ctx->sock, &fromaddr, fromsize, 0);
-        client->block++;
+        client->block = 1;
         client->lastsent = _curtime();
         client->connected = 1;
 
@@ -358,7 +366,7 @@ tftpd__run(tftpd_ctx_t* ctx)
           client->done = 1;
         }
 
-        _send_ack(ctx->sock, &fromaddr, fromsize, block);
+        tftpd__send_ack(ctx->sock, &fromaddr, fromsize, block);
         client->block++;
         client->lastsent = _curtime();
         break;
@@ -400,33 +408,7 @@ tftpd__run(tftpd_ctx_t* ctx)
       else if ((_curtime() - s->lastsent) < RETRY_PERIOD)
         continue;
 
-      char readBuf[sizeof(struct tftp_data) + BLOCK_SIZE];
-
-      struct tftp_data *packet = (struct tftp_data *)readBuf;
-      packet->op = htons(TFTP_DATA);
-      packet->block = htons(s->block);
-
-      /* Seek and read based on block number */
-      lseek(s->fd, (s->block - 1) * BLOCK_SIZE, SEEK_SET);
-
-      ssize_t nr = read(s->fd, &packet->data, BLOCK_SIZE);
-      if (nr < 0) {
-        fprintf(stderr, "Unable to read %s: %s\n", s->file, strerror(errno));
-      }
-
-      /* No more data to read, mark as dead and move on */
-      if (nr == 0) {
-        s->done = 1;
-        continue;
-      }
-
-      ssize_t sz = sizeof(struct tftp_data) + nr;
-      if (sendto(ctx->sock, packet, sz, 0, (struct sockaddr *)&s->addr, sizeof(s->addr)) != sz) {
-        perror("send");
-      }
-
-      s->lastsent = _curtime();
-      s->acked = 0;
+      tftpd__send_data(ctx, s, s->block);
     }
 
     /*************** Cleanup clients ***************/
@@ -499,7 +481,7 @@ _send_error_resp(
 }
 
 static void
-_send_ack(int fd, struct sockaddr_in *dst, socklen_t socklen, uint16_t block)
+tftpd__send_ack(int fd, struct sockaddr_in *dst, socklen_t socklen, uint16_t block)
 {
   struct tftp_ack a = {htons(TFTP_ACK), htons(block)};
   if (sendto(fd, &a, sizeof(a), 0, (struct sockaddr *)dst, socklen) < 0) {
@@ -513,4 +495,36 @@ _curtime()
   struct timespec tp;
   clock_gettime(CLOCK_MONOTONIC, &tp);
   return tp.tv_sec + (tp.tv_nsec / 1e9);
+}
+
+static void
+tftpd__send_data(tftpd_ctx_t* ctx, tftpd_state_t* s, int block)
+{
+  char readBuf[sizeof(struct tftp_data) + BLOCK_SIZE];
+
+  struct tftp_data *packet = (struct tftp_data *)readBuf;
+  packet->op = htons(TFTP_DATA);
+  packet->block = htons(s->block);
+
+  /* Seek and read based on block number */
+  lseek(s->fd, (s->block - 1) * BLOCK_SIZE, SEEK_SET);
+
+  ssize_t nr = read(s->fd, &packet->data, BLOCK_SIZE);
+  if (nr < 0) {
+    fprintf(stderr, "Unable to read %s: %s\n", s->file, strerror(errno));
+  }
+
+  /* No more data to read, mark as dead and move on */
+  if (nr == 0) {
+    s->done = 1;
+    return;
+  }
+
+  ssize_t sz = sizeof(struct tftp_data) + nr;
+  if (sendto(ctx->sock, packet, sz, 0, (struct sockaddr *)&s->addr, sizeof(s->addr)) != sz) {
+    perror("send");
+  }
+
+  s->lastsent = _curtime();
+  s->acked = 0;
 }

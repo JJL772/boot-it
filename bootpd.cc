@@ -236,8 +236,8 @@ bootpd__run(struct bootpd_ctx* ctx)
     if (!cfg) {
       if (ctx->opts.verbose) {
         printf(" --> No matching device; discarding\n");
-        continue;
       }
+      continue;
     }
 
     bootpd__reply(ctx, cfg, &packet);

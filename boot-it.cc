@@ -32,6 +32,7 @@ struct bootit_ctx
 };
 
 static bool bootit__parse_cfg(struct bootit_ctx* ctx, const char* cfg);
+static void bootit__show_help(const char* a0, int code);
 
 int
 main(int argc, char** argv)
@@ -41,7 +42,7 @@ main(int argc, char** argv)
   
   char config[PATH_MAX];
 
-  while ((opt = getopt(argc, argv, "c:i:v")) != -1) {
+  while ((opt = getopt(argc, argv, "c:i:vh")) != -1) {
     switch (opt) {
     case 'c':
       if (!bootit__parse_cfg(&ctx, optarg))
@@ -53,9 +54,13 @@ main(int argc, char** argv)
     case 'v':
       ctx.bootpd_opts.verbose++;
       break;
+    case 'h':
+      bootit__show_help(argv[0], 0);
+      break;
     default:
       printf("unknown arg '%c'\n", opt);
-      exit(1);
+      bootit__show_help(argv[0], 1);
+      break;
     }
   }
   
@@ -86,7 +91,6 @@ main(int argc, char** argv)
     sleep(1);
   }
 }
-
 
 static void
 error_callback(const char* s)
@@ -176,4 +180,15 @@ bootit__parse_cfg(struct bootit_ctx* ctx, const char* cfg)
 
   free(buf);
   return true;
+}
+
+static void
+bootit__show_help(const char* arg0, int code)
+{
+  fprintf(stderr, "USAGE: %s [-c CONFIG] [-i INTERFACE] [-v]\n", arg0);
+  fprintf(stderr, "Options:\n");
+  fprintf(stderr, " -c CONFIG    - Set the configuration file to use\n");
+  fprintf(stderr, " -i IFACE     - Bind to this specific network interface (ex: eth0)\n");
+  fprintf(stderr, " -v           - Enable verbose mode\n");
+  exit(code);
 }
