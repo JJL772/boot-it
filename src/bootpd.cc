@@ -21,6 +21,7 @@
 #include <pthread.h>
 
 #include "bootpd.h"
+#include "logging.h"
 
 struct bootpd_ctx
 {
@@ -212,7 +213,7 @@ bootpd__run(struct bootpd_ctx* ctx)
     bootpd__mac2str(packet.chaddr, packet.hlen, mac, sizeof(mac));
 
     if (ctx->opts.verbose) {
-      printf(
+      logMsg(
         "BOOTP XID 0x%08X; SECS %d; MAC %s\n",
         ntohl(packet.xid),
         ntohs(packet.secs),
@@ -223,7 +224,7 @@ bootpd__run(struct bootpd_ctx* ctx)
     /* check if hostname is set & matches */
     if (*packet.sname && strcmp(packet.sname, ctx->hostname.c_str())) {
       if (ctx->opts.verbose) {
-        printf(
+        logMsg(
           " --> Hostname '%s' != ours '%s'; discarding\n",
           packet.sname,
           ctx->hostname.c_str()
@@ -235,7 +236,7 @@ bootpd__run(struct bootpd_ctx* ctx)
     auto* cfg = bootpd__find_dev(ctx, mac);
     if (!cfg) {
       if (ctx->opts.verbose) {
-        printf(" --> No matching device; discarding\n");
+        logMsg(" --> No matching device; discarding\n");
       }
       continue;
     }
@@ -243,7 +244,7 @@ bootpd__run(struct bootpd_ctx* ctx)
     bootpd__reply(ctx, cfg, &packet);
 
     if (ctx->opts.verbose)
-      printf(" --> Replied\n");
+      logMsg(" --> Replied\n");
   }
   return 0;
 }
@@ -274,6 +275,7 @@ bootpd__reply(struct bootpd_ctx* ctx, struct bootp_device* dev, struct bootp_pac
   /* send it off */
   auto* sa = (struct sockaddr*)&ctx->if_baddr;
   if ((r = sendto(ctx->ssock, &newp, sizeof(newp), 0, sa, sizeof(ctx->if_baddr))) < 0) {
+    LogScope ls;
     perror("send");
   }
 }

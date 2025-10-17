@@ -16,12 +16,26 @@
 #include <string>
 #include <vector>
 #include <list>
+#include <mutex>
+#include <cstdarg>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "cfgparser.h"
 #include "path-tools.h"
 
 #include "tftpd.h"
 #include "bootpd.h"
+#include "logging.h"
+
+int verbose = 0;
+
+std::mutex&
+logMutex()
+{
+  static std::mutex m;
+  return m;
+}
 
 struct bootit_ctx
 {
@@ -39,6 +53,7 @@ main(int argc, char** argv)
 {
   struct bootit_ctx ctx = {};
   int opt = -1;
+  bool parsed_cfg = false;
   
   char config[PATH_MAX];
 
@@ -47,12 +62,14 @@ main(int argc, char** argv)
     case 'c':
       if (!bootit__parse_cfg(&ctx, optarg))
         return -1;
+      parsed_cfg = true;
       break;
     case 'i':
       ctx.bootpd_opts.interface = optarg;
       break;
     case 'v':
       ctx.bootpd_opts.verbose++;
+      verbose++;
       break;
     case 'h':
       bootit__show_help(argv[0], 0);
@@ -63,7 +80,21 @@ main(int argc, char** argv)
       break;
     }
   }
-  
+
+  /* default to boot.cfg in the cwd */
+  if (!parsed_cfg) {
+    struct stat st;
+    if (stat("boot.cfg", &st) < 0) {
+      fprintf(stderr, "Could not load boot.cfg\n");
+      return 1;
+    }
+
+    if (!bootit__parse_cfg(&ctx, "boot.cfg")) {
+      fprintf(stderr, "Error while loading boot.cfg\n");
+      return 1;
+    }
+  }
+
   if (ctx.bootpd_opts.interface.empty()) {
     fprintf(stderr, "Interface must be specified using -i\n");
     return 1;
@@ -191,4 +222,43 @@ bootit__show_help(const char* arg0, int code)
   fprintf(stderr, " -i IFACE     - Bind to this specific network interface (ex: eth0)\n");
   fprintf(stderr, " -v           - Enable verbose mode\n");
   exit(code);
+}
+
+void
+logErr(const char* fmt, ...)
+{
+  LogScope ls;
+  
+  va_list va;
+  va_start(va, fmt);
+  fprintf(stderr, "[ERR] ");
+  vfprintf(stdout, fmt, va);
+  va_end(va);
+}
+
+void
+logMsg(const char* fmt, ...)
+{
+  if (!verbose)
+    return;
+
+  LogScope ls;
+  
+  va_list va;
+  va_start(va, fmt);
+  fprintf(stderr, "[INFO] ");
+  vfprintf(stdout, fmt, va);
+  va_end(va);
+}
+
+void
+logWarn(const char* fmt, ...)
+{
+  LogScope ls;
+  
+  va_list va;
+  va_start(va, fmt);
+  fprintf(stderr, "[WARN] ");
+  vfprintf(stdout, fmt, va);
+  va_end(va);
 }

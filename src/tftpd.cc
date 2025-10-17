@@ -3,9 +3,9 @@
 //-----------------------------------------------------------------------------------------
 // Purpose: Lightweight tftp daemon in C++
 //-----------------------------------------------------------------------------------------
-// This file is part of 'lwtftp'. It is subject to the license terms in the
+// This file is part of 'boot-it'. It is subject to the license terms in the
 // LICENSE file found in the top-level directory of this distribution.
-// No part of 'lwtftp', including this file, may be copied, modified, propagated,
+// No part of 'boot-it', including this file, may be copied, modified, propagated,
 // or otherwise distributed except according to the terms contained in the LICENSE file.
 //
 // SPDX-License-Identifier: BSD-3-Clause
@@ -27,6 +27,7 @@
 #include <pthread.h>
 
 #include "tftpd.h"
+#include "logging.h"
 
 /*** Protocol Definitions ***/
 #define TFTP_RRQ 1
@@ -213,7 +214,7 @@ tftpd__run(tftpd_ctx_t* ctx)
       case TFTP_WRQ: {
         char fileName[PATH_MAX] = {0}, mode[32] = {0};
         if (rem < 4) {
-          fprintf(stderr, "Short read/write request from %s\n", inet_ntoa(fromaddr.sin_addr));
+          logErr("Short read/write request from %s\n", inet_ntoa(fromaddr.sin_addr));
           break;
         }
 
@@ -233,8 +234,7 @@ tftpd__run(tftpd_ctx_t* ctx)
         else if (!strcasecmp(mode, "octet"))
           ;
         else {
-          fprintf(
-            stderr,
+          logErr(
             "Unsupported mode '%s' for file '%s' from %s\n",
             mode,
             fileName,
@@ -256,7 +256,7 @@ tftpd__run(tftpd_ctx_t* ctx)
               break;
             }
           } else {
-            fprintf(stderr, "stat(%s) failed: %s\n", realPath.data(), strerror(errno));
+            logErr("stat(%s) failed: %s\n", realPath.data(), strerror(errno));
             _send_error_resp(ctx->sock, &fromaddr, fromsize, TFTP_ERR_EACCESS, "Stat failed");
             client->errored = 1;
             break;
@@ -289,7 +289,7 @@ tftpd__run(tftpd_ctx_t* ctx)
         client->fd = open(realPath.data(), op == TFTP_WRQ ? (O_CREAT | O_WRONLY | O_TRUNC) : O_RDONLY);
         if (client->fd < 0) {
           const char* err = strerror(errno);
-          fprintf(stderr, "Unable to open '%s': %s\n", realPath.data(), err);
+          logMsg("Unable to open '%s': %s\n", realPath.data(), err);
           _send_error_resp(ctx->sock, &fromaddr, fromsize, TFTP_ERR_ENOENT, err);
           client->errored = 1;
           break;
@@ -299,13 +299,12 @@ tftpd__run(tftpd_ctx_t* ctx)
          * consistently... */
         if (op == TFTP_WRQ && chmod(realPath.data(), 0664) < 0) {
           int se = errno;
-          fprintf(stderr, "Unable to chmod '%s': %s\n", realPath.data(), strerror(se));
+          logErr("Unable to chmod '%s': %s\n", realPath.data(), strerror(se));
           /* we're gonna reject this and remove the file. Don't want any weird
            * files w/broken perms sitting around.. we may be running as root,
            * that makes this even more annoying! */
           if (unlink(realPath.data()) < 0) {
-            fprintf(
-              stderr,
+            logErr(
               "Unable to unlink '%s': %s\n You will have to delete this manually!\n",
               realPath.data(),
               strerror(errno)
@@ -328,13 +327,12 @@ tftpd__run(tftpd_ctx_t* ctx)
         client->lastsent = _curtime();
         client->connected = 1;
 
-        fprintf(stderr, "Open file %s, mode %s\n", fileName, mode);
+        logMsg("Open file %s, mode %s\n", fileName, mode);
         break;
       }
       case TFTP_DATA: {
         if (!client->connected) {
-          fprintf(
-            stderr,
+          logMsg(
             "Unexpected packet from unconnected client at %s; ignoring\n",
             inet_ntoa(fromaddr.sin_addr)
           );
@@ -342,7 +340,7 @@ tftpd__run(tftpd_ctx_t* ctx)
         }
 
         if (!client->write) {
-          fprintf(stderr, "Asked to write, but configured for read-only\n");
+          logWarn("Asked to write, but configured for read-only\n");
           _send_error_resp(ctx->sock, &fromaddr, fromsize, TFTP_ERR_EACCESS, "Asked to write, but configured for read");
           client->errored = 1;
           break;
@@ -376,8 +374,7 @@ tftpd__run(tftpd_ctx_t* ctx)
         if (ntohs(ack->block) == client->block)
           client->acked = 1;
         else {
-          fprintf(
-            stderr,
+          logWarn(
             "Acked block '%d' but client was expecting ack for '%d'\n",
             ntohs(ack->block),
             client->block
@@ -389,7 +386,7 @@ tftpd__run(tftpd_ctx_t* ctx)
       case TFTP_ERR:
         break;
       default:
-        fprintf(stderr, "Unknown opcode %d from %s\n", (int)op, inet_ntoa(fromaddr.sin_addr));
+        logWarn("Unknown opcode %d from %s\n", (int)op, inet_ntoa(fromaddr.sin_addr));
         client->errored = 1;
         break;
       }
@@ -416,7 +413,7 @@ tftpd__run(tftpd_ctx_t* ctx)
       /* close open files when we're done with them, or if we timeout */
       if ((s->done && s->acked) || s->errored ||
           (_curtime() - s->lastsent > TIMEOUT_PERIOD)) {
-        printf("Closed connection %s\n", inet_ntoa(s->addr.sin_addr));
+        logMsg("Closed connection %s\n", inet_ntoa(s->addr.sin_addr));
         close(s->fd);
         if (prev)
           prev->next = s->next;
@@ -441,7 +438,6 @@ tftpd__find_file(tftpd_ctx_t* ctx, const char* file)
   for (const auto& p : ctx->opts.paths) {
     char tryFind[PATH_MAX];
     snprintf(tryFind, sizeof(tryFind), "%s/%s", p.data(), file);
-    printf("[find] checking %s...\n", tryFind);
     
     struct stat st;
     if (stat(tryFind, &st) < 0)
@@ -476,8 +472,10 @@ _send_error_resp(
   x.packet.op = htons(TFTP_ERR);
   strncpy(x.packet.str, msg, sizeof(x.rawbuf) - sizeof(x.packet));
 
-  if (sendto(fd, x.rawbuf, sizeof(x.packet) + strlen(msg) + 1, 0, (struct sockaddr *)dst, socklen) < 0)
+  if (sendto(fd, x.rawbuf, sizeof(x.packet) + strlen(msg) + 1, 0, (struct sockaddr *)dst, socklen) < 0) {
+    LogScope ls;
     perror("Unable to send error response");
+  }
 }
 
 static void
@@ -485,6 +483,7 @@ tftpd__send_ack(int fd, struct sockaddr_in *dst, socklen_t socklen, uint16_t blo
 {
   struct tftp_ack a = {htons(TFTP_ACK), htons(block)};
   if (sendto(fd, &a, sizeof(a), 0, (struct sockaddr *)dst, socklen) < 0) {
+    LogScope ls;
     perror("Unable to send ACK");
   }
 }
@@ -511,7 +510,7 @@ tftpd__send_data(tftpd_ctx_t* ctx, tftpd_state_t* s, int block)
 
   ssize_t nr = read(s->fd, &packet->data, BLOCK_SIZE);
   if (nr < 0) {
-    fprintf(stderr, "Unable to read %s: %s\n", s->file, strerror(errno));
+    logErr("Unable to read %s: %s\n", s->file, strerror(errno));
   }
 
   /* No more data to read, mark as dead and move on */
@@ -522,6 +521,7 @@ tftpd__send_data(tftpd_ctx_t* ctx, tftpd_state_t* s, int block)
 
   ssize_t sz = sizeof(struct tftp_data) + nr;
   if (sendto(ctx->sock, packet, sz, 0, (struct sockaddr *)&s->addr, sizeof(s->addr)) != sz) {
+    LogScope ls;
     perror("send");
   }
 
