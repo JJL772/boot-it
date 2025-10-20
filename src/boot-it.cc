@@ -20,6 +20,7 @@
 #include <cstdarg>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <array>
 
 #include "cfgparser.h"
 #include "path-tools.h"
@@ -124,6 +125,43 @@ main(int argc, char** argv)
 }
 
 static void
+bootit__parse_dhcp_opts(std::vector<dhcp_opt_t>& opts, const char* name, const char* val)
+{
+  name += sizeof("dhcp.") - 1; /* skip dhcp. prefix */
+
+  const dhcp_opt_desc* od = nullptr;
+
+  /* attempt to match with a valid parameter */
+  int i;
+  for (i = 0; i < DHCP_MAX_OPTS; ++i) {
+    if (!strcmp(name, valid_dhcp_opts()[i].name.c_str())) {
+      od = &valid_dhcp_opts()[i];
+      break;
+    }
+  }
+
+  if (!od) {
+    fprintf(stderr, "[WARN] Invalid DHCP opt '%s'\n", name);
+    return;
+  }
+
+  if (strlen(val) > 255) {
+    fprintf(stderr, "[WARN] Option '%s' value too long (>255 chars)\n", name);
+    return;
+  }
+
+  if (!validate_dhcp_opt(*od, val)) {
+    fprintf(stderr, "[WARN] Invalid value '%s' for option '%s'\n", name, val);
+    return;
+  }
+
+  opts.push_back({
+    .id = (uint8_t)i,
+    .value = val,
+  });
+}
+
+static void
 error_callback(const char* s)
 {
   fprintf(stderr, "%s\n", s);
@@ -185,6 +223,9 @@ bootit__parse_cfg(struct bootit_ctx* ctx, const char* cfg)
 
           ctx->tftpd_opts.paths.push_back(obuf);
         }
+        else if (!strncmp(v->value, "dhcp.", 5)) { /* dhcp options */
+          bootit__parse_dhcp_opts(ctx->bootpd_opts.dhcp_opts, v->name, v->value);
+        }
       }
       
       continue;
@@ -202,6 +243,8 @@ bootit__parse_cfg(struct bootit_ctx* ctx, const char* cfg)
         dev.file = v->value;
       else if (!strcmp(v->name, "vend"))  /* vend key */
         dev.vend = v->value;
+      else if (!strncmp(v->name, "dhcp.", 5)) /* dhcp opts */
+        bootit__parse_dhcp_opts(dev.dhcp_opts, v->name, v->value);
       else
         fprintf(stderr, "WARN: Ignoring unknown key '%s'\n", v->name);
     }

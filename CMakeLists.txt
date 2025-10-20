@@ -12,3 +12,5 @@ add_executable(
 )
 
 install(TARGETS boot-it)
+
+set(CMAKE_CXX_FLAGS "-g")

@@ -435,6 +435,9 @@ tftpd__run(tftpd_ctx_t* ctx)
 static std::string
 tftpd__find_file(tftpd_ctx_t* ctx, const char* file)
 {
+  if (*file == '/')
+    return file;
+
   for (const auto& p : ctx->opts.paths) {
     char tryFind[PATH_MAX];
     snprintf(tryFind, sizeof(tryFind), "%s/%s", p.data(), file);
