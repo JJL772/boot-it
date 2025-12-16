@@ -119,28 +119,40 @@ main(int argc, char** argv)
     }
   }
   
-  /* configure stdin for key presses */
-  struct termios t;
-  if (tcgetattr(STDIN_FILENO, &t) >= 0) {
-    t.c_lflag &= ~ICANON;
-    t.c_lflag &= ~ECHO;
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &t) < 0)
-      perror("tcsetattr");
+  bool tty = isatty(STDIN_FILENO);
+
+  /* configure stdin for key presses, if we're a tty */
+  if (tty) {
+    struct termios t;
+    if (tcgetattr(STDIN_FILENO, &t) >= 0) {
+      t.c_lflag &= ~ICANON; /* disable canonical mode, get chars immediately */
+      t.c_lflag &= ~ECHO;   /* disable input echo */
+      if (tcsetattr(STDIN_FILENO, TCSANOW, &t) < 0)
+        perror("tcsetattr");
+    }
+    else {
+      perror("tcgetattr");
+    }
   }
-  else
-    perror("tcgetattr");
 
   bool paused = false;
   while (1) {
-    int c = getchar();
-    switch (c) {
-    case 'p':
-      paused = !paused;
-      bootpd_pause(bpc, paused);
-      printf("BOOTP %s\n", paused ? "paused" : "unpaused");
-      break;
+    /* input handling for tty */
+    if (tty) {
+      int c = getchar();
+      switch (c) {
+      case 'p':  /* pause/unpause */
+        paused = !paused;
+        bootpd_pause(bpc, paused);
+        printf("BOOTP %s\n", paused ? "paused" : "unpaused");
+        break;
+      }
+      usleep(1000);
+      }
+    /* non-tty mode (i.e. logging to file) */
+    else {
+      sleep(1);
     }
-    usleep(1000);
   }
 }
 
