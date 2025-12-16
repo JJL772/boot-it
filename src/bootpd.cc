@@ -19,6 +19,7 @@
 #include <ifaddrs.h>
 #include <linux/if.h>
 #include <pthread.h>
+#include <atomic>
 
 #include "bootpd.h"
 #include "logging.h"
@@ -34,10 +35,11 @@ struct bootpd_ctx
   struct sockaddr_in if_baddr;
   
   bootpd_opts_t opts;
-  
+
   pthread_t thr;
   pthread_attr_t thrattr;
   int run;
+  std::atomic_bool paused;
 };
 
 static int bootpd__setup_socket(struct sockaddr_in* addr, const char* iface);
@@ -212,6 +214,9 @@ bootpd__run(struct bootpd_ctx* ctx)
     char mac[32];
     bootpd__mac2str(packet.chaddr, packet.hlen, mac, sizeof(mac));
 
+    if (ctx->paused)
+      continue; /* discard if paused */
+
     if (ctx->opts.verbose) {
       logMsg(
         "BOOTP XID 0x%08X; SECS %d; MAC %s\n",
@@ -302,4 +307,10 @@ bootpd__find_dev(struct bootpd_ctx* ctx, const char* mac)
       return &dev;
   }
   return nullptr;
+}
+
+void
+bootpd_pause(bootpd_ctx_t* c, int pause)
+{
+  c->paused = !!pause;
 }

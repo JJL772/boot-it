@@ -39,6 +39,7 @@ typedef struct bootpd_ctx bootpd_ctx_t;
 
 bootpd_ctx_t* bootpd_start(const bootpd_opts_t* opts);
 void bootpd_stop(bootpd_ctx_t* c);
+void bootpd_pause(bootpd_ctx_t* c, int pause);
 
 /*-------------------- Protocol Definitions --------------------*/
 

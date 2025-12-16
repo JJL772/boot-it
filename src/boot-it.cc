@@ -20,6 +20,7 @@
 #include <cstdarg>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <termios.h>
 
 #include "cfgparser.h"
 #include "path-tools.h"
@@ -118,8 +119,28 @@ main(int argc, char** argv)
     }
   }
   
+  /* configure stdin for key presses */
+  struct termios t;
+  if (tcgetattr(STDIN_FILENO, &t) >= 0) {
+    t.c_lflag &= ~ICANON;
+    t.c_lflag &= ~ECHO;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &t) < 0)
+      perror("tcsetattr");
+  }
+  else
+    perror("tcgetattr");
+
+  bool paused = false;
   while (1) {
-    sleep(1);
+    int c = getchar();
+    switch (c) {
+    case 'p':
+      paused = !paused;
+      bootpd_pause(bpc, paused);
+      printf("BOOTP %s\n", paused ? "paused" : "unpaused");
+      break;
+    }
+    usleep(1000);
   }
 }
 
