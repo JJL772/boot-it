@@ -181,6 +181,14 @@ tftpd_stop(tftpd_ctx_t* ctx)
 }
 
 static int
+compare_addrs(const struct sockaddr_in& l, const struct sockaddr_in& r)
+{
+  return l.sin_addr.s_addr == r.sin_addr.s_addr &&
+    l.sin_port == r.sin_port &&
+    l.sin_family == r.sin_family;
+}
+
+static int
 tftpd__run(tftpd_ctx_t* ctx)
 {
 
@@ -199,7 +207,7 @@ tftpd__run(tftpd_ctx_t* ctx)
 
       /* Match a client from the list, or create a new one */
       struct tftpd_state *client = ctx->clients;
-      for (; client && client->addr.sin_addr.s_addr != fromaddr.sin_addr.s_addr; client = client->next)
+      for (; client && !compare_addrs(client->addr, fromaddr); client = client->next)
         ;
 
       if (!client) {
