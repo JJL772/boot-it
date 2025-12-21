@@ -16,10 +16,12 @@
 #include <string>
 #include <list>
 
+#include <netinet/in.h>
+
 typedef struct bootp_device
 {
   std::string mac;
-  std::string ip;
+  in_addr_t ip;
   std::string file;
   std::string vend;
 } bootp_device_t;

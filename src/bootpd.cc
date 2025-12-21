@@ -260,7 +260,7 @@ bootpd__reply(struct bootpd_ctx* ctx, struct bootp_device* dev, struct bootp_pac
   struct bootp_packet newp = *packet;
   newp.op = BOOTP_OP_REPLY;
   if (!newp.ciaddr) /* assign IP if the client doesn't know theirs yet */
-    newp.yiaddr = inet_addr(dev->ip.data());
+    newp.yiaddr = dev->ip;
 
   gethostname(newp.sname, sizeof(newp.sname)-1);
 
