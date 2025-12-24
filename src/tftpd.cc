@@ -71,7 +71,7 @@ struct tftp_data
 
 typedef struct tftpd_state
 {
-  char file[PATH_MAX];
+  std::string file;
   int fd;
   struct sockaddr_in addr;
   uint16_t block;
@@ -81,8 +81,6 @@ typedef struct tftpd_state
   int errored;
   int write;
   int connected;
-
-  struct tftpd_state *next;
 } tftpd_state_t;
 
 int tftpd(const tftpd_opts_t *opts);
@@ -110,7 +108,7 @@ static void tftpd__send_data(tftpd_ctx_t* ctx, tftpd_state_t* client, int block)
 struct tftpd_ctx
 {
   int sock;
-  struct tftpd_state* clients;
+  std::vector<tftpd_state> clients;
 
   pthread_attr_t thrattr;
   pthread_t thr;
@@ -188,6 +186,20 @@ compare_addrs(const struct sockaddr_in& l, const struct sockaddr_in& r)
     l.sin_family == r.sin_family;
 }
 
+static struct tftpd_state*
+find_or_add_client(tftpd_ctx_t* c, struct sockaddr_in* addr)
+{
+  for (auto &e : c->clients) {
+    if (compare_addrs(e.addr, *addr))
+      return &e;
+  }
+
+  c->clients.push_back({
+    .addr = *addr,
+  });
+  return &c->clients[c->clients.size()-1];
+}
+
 static int
 tftpd__run(tftpd_ctx_t* ctx)
 {
@@ -206,16 +218,7 @@ tftpd__run(tftpd_ctx_t* ctx)
       ssize_t rem = r;
 
       /* Match a client from the list, or create a new one */
-      struct tftpd_state *client = ctx->clients;
-      for (; client && !compare_addrs(client->addr, fromaddr); client = client->next)
-        ;
-
-      if (!client) {
-        client = (tftpd_state_t*)calloc(1, sizeof(struct tftpd_state));
-        client->addr = fromaddr;
-        client->next = ctx->clients;
-        ctx->clients = client;
-      }
+      struct tftpd_state *client = find_or_add_client(ctx, &fromaddr);
 
       switch (op) {
       case TFTP_RRQ:
@@ -290,7 +293,7 @@ tftpd__run(tftpd_ctx_t* ctx)
         if (client->fd > 0)
           close(client->fd);
 
-        strncpy(client->file, realPath.data(), sizeof(client->file) - 1);
+        client->file = realPath;
         client->file[sizeof(client->file) - 1] = 0;
         client->write = op == TFTP_WRQ;
 
@@ -387,8 +390,9 @@ tftpd__run(tftpd_ctx_t* ctx)
             ntohs(ack->block),
             client->block
           );
-          client->errored = 1;
+          //client->errored = 1;
         }
+        client->lastsent = _curtime();
         break;
       }
       case TFTP_ERR:
@@ -401,39 +405,37 @@ tftpd__run(tftpd_ctx_t* ctx)
     }
 
     /*************** Service outgoing requests ***************/
-    for (tftpd_state_t *s = ctx->clients; s; s = s->next) {
-      /* No outgoing requests from us */
-      if (s->write)
+    for (auto &s : ctx->clients) {
+      /* skip r/o clients, or ones that aren't open */
+      if (s.write || !s.connected)
         continue;
 
       /* If ack'ed, move to next block */
-      if (s->acked)
-        s->block++;
+      if (s.acked) {
+        s.block++;
+        s.acked = 0;
+      }
       /* Not ack'ed yet; wait until retry period exceeded for this client */
-      else if ((_curtime() - s->lastsent) < RETRY_PERIOD)
+      else if ((_curtime() - s.lastsent) < RETRY_PERIOD) {
         continue;
+      }
 
-      tftpd__send_data(ctx, s, s->block);
+      tftpd__send_data(ctx, &s, s.block);
+      s.lastsent = _curtime();
     }
 
     /*************** Cleanup clients ***************/
-    for (tftpd_state_t *s = ctx->clients, *prev = NULL; s;) {
+    for (auto s = ctx->clients.begin(); s != ctx->clients.end();) {
       /* close open files when we're done with them, or if we timeout */
       if ((s->done && s->acked) || s->errored ||
-          (_curtime() - s->lastsent > TIMEOUT_PERIOD)) {
-        logMsg("Closed connection %s\n", inet_ntoa(s->addr.sin_addr));
+          (_curtime() - s->lastsent > TIMEOUT_PERIOD))
+      {
+        logWarn("Closed connection %s\n", inet_ntoa(s->addr.sin_addr));
         close(s->fd);
-        if (prev)
-          prev->next = s->next;
-        if (s == ctx->clients)
-          ctx->clients = NULL;
-        tftpd_state_t *ns = s->next;
-        free(s);
-        s = ns;
-      } else {
-        prev = s;
-        s = s->next;
+        s = ctx->clients.erase(s);
       }
+      else
+        ++s;
     }
   }
 
@@ -518,13 +520,13 @@ tftpd__send_data(tftpd_ctx_t* ctx, tftpd_state_t* s, int block)
 
   ssize_t nr = read(s->fd, &packet->data, BLOCK_SIZE);
   if (nr < 0) {
-    logErr("Unable to read %s: %s\n", s->file, strerror(errno));
+    logErr("Unable to read %s: %s\n", s->file.data(), strerror(errno));
   }
 
-  /* No more data to read, mark as dead and move on */
+  /* No more data to read, mark as dead. we'll still need to send an
+   * additional packet of 0 len to terminate the transfer */
   if (nr == 0) {
     s->done = 1;
-    return;
   }
 
   ssize_t sz = sizeof(struct tftp_data) + nr;
