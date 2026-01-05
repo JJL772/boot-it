@@ -22,6 +22,7 @@ typedef struct bootp_device
 {
   std::string mac;
   in_addr_t ip;
+  in_addr_t subnet;
   std::string file;
   std::string vend;
 } bootp_device_t;

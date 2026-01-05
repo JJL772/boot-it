@@ -22,6 +22,9 @@
 #include <unistd.h>
 #include <termios.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 #include "cfgparser.h"
 #include "path-tools.h"
 
@@ -229,8 +232,20 @@ bootit__parse_cfg(struct bootit_ctx* ctx, const char* cfg)
     dev.mac = s->name;
     
     for (cfg_val_t* v = s->values; v; v = v->next) {
-      if (!strcmp(v->name, "ip"))         /* ip addr key */
-        dev.ip = v->value;
+      if (!strcmp(v->name, "ip")) {       /* ip addr key */
+        struct in_addr in;
+        if (!inet_aton(v->value, &in)) {
+          fprintf(stderr, "WARN: Invalid IP provided '%s'\n", v->value);
+        }
+        dev.ip = in.s_addr;
+      }
+      else if (!strcmp(v->name, "subnet-mask")) {
+        struct in_addr in;
+        if (!inet_aton(v->value, &in)) {
+          fprintf(stderr, "WARN: Invalid subnet-mask '%s'\n", v->value);
+        }
+        dev.subnet = in.s_addr;
+      }
       else if (!strcmp(v->name, "file"))  /* boot file key */
         dev.file = v->value;
       else if (!strcmp(v->name, "vend"))  /* vend key */
