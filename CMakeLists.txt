@@ -9,6 +9,7 @@ add_executable(
     src/boot-it.cc
     src/bootpd.cc
     src/tftpd.cc
+    src/menu.cc
 )
 
 install(TARGETS boot-it)
